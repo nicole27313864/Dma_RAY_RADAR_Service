@@ -83,6 +83,9 @@ const handleRadarAction = async (req, res) => {
 
     try {
         if (action === 'start') {
+            // 自動開放防火牆埠口
+            await exec(`sudo ufw allow ${config.appPort}`);
+
             const command = `nohup bash -c "echo -e \\"${config.adminPass}\\n${config.appPort}\\" | wine \\"${RADAR_EXE_PATH}\\"" > ${LOG_FILE} 2>&1 &`;
             await exec(command);
             res.send(`<h3>Radar 已啟動</h3><pre>後台進程已成功啟動。</pre>`);
@@ -827,7 +830,7 @@ const translations = {
         fileStatusChecking: '加载中...',
         fileMtimeLabel: '文件上传时间：',
         fileMtimeNotFound: '找不到文件',
-        uploadButton: '上传雷达 EXE',
+        uploadButton: '上传 EXE',
         updateButton: '更新雷达 EXE',
         deleteButton: '删除雷达 EXE',
         startButton: '启动 Radar',
@@ -871,7 +874,7 @@ const translations = {
         fileStatusChecking: '載入中...',
         fileMtimeLabel: '檔案上傳時間：',
         fileMtimeNotFound: '找不到檔案',
-        uploadButton: '上傳雷達 EXE',
+        uploadButton: '上傳 EXE',
         updateButton: '更新雷達 EXE',
         deleteButton: '刪除雷達 EXE',
         startButton: '啟動 Radar',
