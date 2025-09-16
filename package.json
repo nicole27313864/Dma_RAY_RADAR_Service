@@ -1,0 +1,19 @@
+{
+  "name": "ray_radar_web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chinese-conv": "^3.2.2",
+    "express": "^5.1.0",
+    "iconv-lite": "^0.7.0",
+    "opencc-js": "^1.0.5",
+    "tongwen": "^0.3.2"
+  }
+}
