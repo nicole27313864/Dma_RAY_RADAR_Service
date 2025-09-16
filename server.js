@@ -9,13 +9,30 @@ const multer = require('multer');
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
-// 定義常數
+// 定義常數與檔案路徑
 const RADAR_EXE_PATH = '/root/Dma_RAY_RADAR_Service/RAY_DELTA_RADAR.exe';
 const LOG_FILE = '/root/Dma_RAY_RADAR_Service/radar.log';
+const CONFIG_FILE = '/root/Dma_RAY_RADAR_Service/config.json';
 const PORT = 3000;
-const ADMIN_PASS = 'admin666';
-const APP_PORT = '8080';
+
+let config = {}; // 全局變數，用於儲存設定
+
+// 讀取設定檔案
+const loadConfig = async () => {
+    try {
+        const data = await fs.readFile(CONFIG_FILE, 'utf8');
+        config = JSON.parse(data);
+        console.log('設定檔案已成功載入。');
+    } catch (e) {
+        console.error('載入設定檔案失敗，將使用預設值。', e.message);
+        config = {
+            adminPass: 'admin666',
+            appPort: '8080'
+        };
+    }
+};
 
 // 設定 Multer 儲存引擎
 const storage = multer.diskStorage({
@@ -43,6 +60,16 @@ const checkFileExists = async (filePath) => {
     }
 };
 
+// 輔助函式：檢查進程是否運行
+const isRadarRunning = async () => {
+    try {
+        const { stdout } = await exec(`ps aux | grep "RAY_DELTA_RADAR.exe" | grep -v "grep"`);
+        return stdout.trim() !== '';
+    } catch (e) {
+        return false;
+    }
+};
+
 /**
  * 處理啟動、停止、查看狀態的指令
  */
@@ -56,7 +83,7 @@ const handleRadarAction = async (req, res) => {
 
     try {
         if (action === 'start') {
-            const command = `nohup bash -c "echo -e \\"${ADMIN_PASS}\\n${APP_PORT}\\" | wine \\"${RADAR_EXE_PATH}\\"" > ${LOG_FILE} 2>&1 &`;
+            const command = `nohup bash -c "echo -e \\"${config.adminPass}\\n${config.appPort}\\" | wine \\"${RADAR_EXE_PATH}\\"" > ${LOG_FILE} 2>&1 &`;
             await exec(command);
             res.send(`<h3>Radar 已啟動</h3><pre>後台進程已成功啟動。</pre>`);
         } else if (action === 'stop') {
@@ -69,15 +96,11 @@ const handleRadarAction = async (req, res) => {
                 await fs.writeFile(LOG_FILE, '', 'utf8');
             }
         } else if (action === 'status') {
-            try {
-                const { stdout } = await exec(`ps aux | grep "RAY_DELTA_RADAR.exe" | grep -v "grep"`);
-                if (stdout.trim() === '') {
-                    res.send(`<h3>Radar 狀態: 未運行</h3><pre>沒有找到相關進程。</pre>`);
-                } else {
-                    res.send(`<h3>Radar 狀態: 運行中</h3>`);
-                }
-            } catch (error) {
-                res.send(`<h3>Radar 狀態: 未運行</h3><pre>執行命令時發生錯誤，或沒有找到相關進程。</pre>`);
+            const isRunning = await isRadarRunning();
+            if (isRunning) {
+                res.send(`<h3>Radar 狀態: 運行中</h3>`);
+            } else {
+                res.send(`<h3>Radar 狀態: 未運行</h3><pre>沒有找到相關進程。</pre>`);
             }
         } else {
             res.send(`<h3>未知指令: ${action}</h3>`);
@@ -169,12 +192,11 @@ const handleDelete = async (req, res) => {
         
         await fs.unlink(RADAR_EXE_PATH);
         
-        // --- 新增：清空日誌檔案 ---
+        // 清空日誌檔案
         try {
             await fs.writeFile(LOG_FILE, '', 'utf8');
         } catch (logErr) {
             console.error('清空日誌檔案失敗:', logErr);
-            // 即使清空失敗，也不影響主要刪除功能，所以忽略錯誤
         }
 
         res.status(200).json({ status: 'success', message: `檔案 ${path.basename(RADAR_EXE_PATH)} 已成功刪除。日誌已清空。` });
@@ -183,10 +205,55 @@ const handleDelete = async (req, res) => {
     }
 };
 
+// --- API 路由 ---
+// 獲取設定
+app.get('/api/get-config', (req, res) => {
+    res.json(config);
+});
+
+// 保存設定並依狀態決定是否重啟
+app.post('/api/save-config', async (req, res) => {
+    const { adminPass, appPort } = req.body;
+    if (!adminPass || !appPort) {
+        return res.status(400).json({ status: 'error', message: '密碼和端口不能為空。' });
+    }
+    
+    // 密碼長度驗證
+    if (adminPass.length !== 8) {
+        return res.status(400).json({ status: 'error', message: '密碼長度必須為8個字元。' });
+    }
+
+    const newConfig = { adminPass, appPort };
+    try {
+        await fs.writeFile(CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf8');
+        config = newConfig; // 更新內存中的設定
+        
+        const isRunning = await isRadarRunning();
+        
+        if (isRunning) {
+            res.status(200).json({ status: 'success', message: '設定已保存。正在重啟服務以應用新設定。' });
+            // 延遲重啟，確保回應已發送
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await exec('pm2 restart radar-panel', { env: { PATH: process.env.PATH + ':/usr/local/bin' } });
+        } else {
+            res.status(200).json({ status: 'success', message: '設定已保存。變更將於下次啟動時套用。' });
+        }
+
+    } catch (error) {
+        res.status(500).json({ status: 'error', message: `保存設定失敗：${error.message}` });
+    }
+});
+
 // 新增一個檢查檔案是否存在的 API 路由
 app.get('/api/check-exe', async (req, res) => {
     const exeExists = await checkFileExists(RADAR_EXE_PATH);
     res.json({ exists: exeExists });
+});
+
+// 新增一個檢查服務是否正在運行的 API 路由
+app.get('/api/check-status', async (req, res) => {
+    const isRunning = await isRadarRunning();
+    res.json({ isRunning: isRunning });
 });
 
 // 新增一個獲取檔案修改時間的 API 路由
@@ -199,6 +266,12 @@ app.get('/api/file-mtime', async (req, res) => {
     }
 });
 
+// 核心路由設定
+app.post('/radar/:action', handleRadarAction);
+app.get('/radar/log', getRadarLog);
+app.post('/upload', upload.single('radarFile'), handleUpload);
+app.post('/restart', handleRestart);
+app.post('/delete-exe', handleDelete);
 
 // --- Web 介面路由 ---
 app.get('/', (req, res) => {
@@ -231,6 +304,17 @@ app.get('/', (req, res) => {
     --file-input-bg: #fff;
     --delete-bg: #e74c3c;
     --delete-hover-bg: #c0392b;
+    --modal-bg: rgba(0,0,0,0.5);
+    --modal-content-bg: #e3e5e5;
+    --input-bg: #fff;
+    --save-btn-bg: #2ecc71;
+    --save-btn-hover-bg: #27ae60;
+    --cancel-btn-bg: #e74c3c;
+    --cancel-btn-hover-bg: #c0392b;
+    --warning-btn-bg: #e74c3c;
+    --warning-btn-hover-bg: #c0392b;
+    --reset-btn-bg: #A9A9A9;
+    --reset-btn-hover-bg: #8c8c8c;
 }
 
 .dark-theme {
@@ -244,6 +328,9 @@ app.get('/', (req, res) => {
     --select-border: #6d8091;
     --log-bg: #1a242f;
     --log-text-color: #b7c0cc;
+    --switch-bg-light: #c9d0cf;
+    --switch-bg-dark: #3498db;
+    --switch-thumb: #fff;
     --thumb-color: #fff;
     --scrollbar-thumb: #5b6e82;
     --scrollbar-track: #2a3847;
@@ -252,6 +339,17 @@ app.get('/', (req, res) => {
     --file-input-bg: #3b5066;
     --delete-bg: #e74c3c;
     --delete-hover-bg: #c0392b;
+    --modal-bg: rgba(0,0,0,0.7);
+    --modal-content-bg: #34495e;
+    --input-bg: #3b5066;
+    --save-btn-bg: #2ecc71;
+    --save-btn-hover-bg: #27ae60;
+    --cancel-btn-bg: #e74c3c;
+    --cancel-btn-hover-bg: #c0392b;
+    --warning-btn-bg: #e74c3c;
+    --warning-btn-hover-bg: #c0392b;
+    --reset-btn-bg: #636e72;
+    --reset-btn-hover-bg: #4b5458;
 }
 
 body {
@@ -299,7 +397,21 @@ button.upload-btn { background-color: var(--upload-bg); }
 button.upload-btn:hover { background-color: var(--upload-hover-bg); }
 button.delete-btn { background-color: var(--delete-bg); }
 button.delete-btn:hover { background-color: var(--delete-hover-bg); }
+button.reset-btn { background-color: var(--reset-btn-bg); color: white; }
+button.reset-btn:hover { background-color: var(--reset-btn-hover-bg); }
+
 button:hover { background-color: var(--button-hover-bg); transform: translateY(-2px); }
+.modal-buttons button.save-btn { background-color: var(--save-btn-bg); }
+.modal-buttons button.save-btn:hover { background-color: var(--save-btn-hover-bg); }
+.modal-buttons button.cancel-btn { background-color: var(--cancel-btn-bg); }
+.modal-buttons button.cancel-btn:hover { background-color: var(--cancel-btn-hover-bg); }
+
+/* 新增的樣式 */
+.modal-buttons button.success-btn { background-color: var(--upload-bg); }
+.modal-buttons button.success-btn:hover { background-color: var(--upload-hover-bg); }
+.modal-buttons button.warning-btn { background-color: var(--warning-btn-bg); }
+.modal-buttons button.warning-btn:hover { background-color: var(--warning-btn-hover-bg); }
+
 
 .select-wrapper {
     position: relative;
@@ -487,6 +599,124 @@ input:checked + .slider:before {
     margin: 0;
 }
 
+/* Modal 樣式 */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: var(--modal-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.modal-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal-content {
+    background-color: var(--modal-content-bg);
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    width: 90%;
+    max-width: 450px;
+    transform: scale(0.95);
+    transition: transform 0.3s ease;
+}
+
+.modal-overlay.show .modal-content {
+    transform: scale(1);
+}
+
+.modal-content h3 {
+    text-align: center;
+    color: var(--header-color);
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+.modal-content label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+.modal-content input {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid var(--select-border);
+    border-radius: 8px;
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    font-size: 16px;
+    box-sizing: border-box;
+    transition: border-color 0.3s ease;
+}
+.modal-content input:focus {
+    outline: none;
+    border-color: var(--button-bg);
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+.modal-buttons button {
+    min-width: 80px;
+}
+
+/* 定義慢速動畫 */
+@keyframes slow-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 定義快速動畫 */
+@keyframes fast-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.settings-btn {
+    font-size: 20px;
+    background-color: #A9A9A9; /* 灰色背景 */
+    border: none;
+    cursor: pointer;
+    color: var(--text-color);
+    transition: color 0.3s ease;
+}
+.gear-icon {
+    display: inline-block;
+    animation: slow-spin 8s linear infinite;
+}
+.settings-btn:hover .gear-icon {
+    animation: fast-spin 2s linear infinite;
+}
+
+/* 確保彈窗中的按鈕能垂直置中 */
+.modal-button-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+}
 </style>
 </head>
 <body>
@@ -506,6 +736,7 @@ input:checked + .slider:before {
             <input type="file" name="radarFile" id="radarFile" accept=".exe" required>
             <div id="action-buttons" style="display: flex; gap: 10px;">
                 <button type="submit" class="upload-btn" id="upload-button"></button>
+                <button id="settings-btn" class="settings-btn" title="設定"><span class="gear-icon">⚙️</span></button>
             </div>
         </form>
     </div>
@@ -536,6 +767,55 @@ input:checked + .slider:before {
     </div>
 </div>
 
+<div id="settings-modal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 data-key="settingsTitle">設定</h3>
+        <form id="settings-form">
+            <label for="adminPass" data-key="adminPassLabel">管理員密碼：</label>
+            <input type="text" id="adminPass" name="adminPass" required>
+            
+            <label for="appPort" data-key="appPortLabel">運行端口：</label>
+            <input type="number" id="appPort" name="appPort" required>
+            
+            <div class="modal-buttons">
+                <button type="button" class="reset-btn" id="reset-settings" data-key="resetButton">重置</button>
+                <button type="button" class="cancel-btn" id="cancel-settings" data-key="cancelButton">取消</button>
+                <button type="submit" class="save-btn" id="save-settings" data-key="saveButton">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="success-modal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 data-key="successTitle">成功</h3>
+        <p id="success-message-text" style="text-align: center; font-size: 1.1em;"></p>
+        <div class="modal-button-container">
+            <button id="success-confirm-btn" class="modal-buttons success-btn">確定</button>
+        </div>
+    </div>
+</div>
+
+<div id="status-warning-modal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 data-key="warningTitle">警告</h3>
+        <p id="status-warning-message-text" style="text-align: center; font-size: 1.1em;"></p>
+        <div class="modal-button-container">
+            <button id="status-warning-confirm-btn" class="modal-buttons warning-btn">確定</button>
+        </div>
+    </div>
+</div>
+
+<div id="warning-modal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 data-key="warningTitle">警告</h3>
+        <p id="warning-message-text" style="text-align: center; font-size: 1.1em;"></p>
+        <div class="modal-button-container">
+            <button id="warning-confirm-btn" class="modal-buttons warning-btn">確定</button>
+        </div>
+    </div>
+</div>
+
 <script>
 // 語言包
 const translations = {
@@ -547,7 +827,7 @@ const translations = {
         fileStatusChecking: '加载中...',
         fileMtimeLabel: '文件上传时间：',
         fileMtimeNotFound: '找不到文件',
-        uploadButton: '上传 EXE',
+        uploadButton: '上传雷达 EXE',
         updateButton: '更新雷达 EXE',
         deleteButton: '删除雷达 EXE',
         startButton: '启动 Radar',
@@ -568,6 +848,20 @@ const translations = {
         deleteFailed: '删除操作失败: ',
         checkFailed: '检查状态失败',
         fileDeleteFailed: '文件删除失败：',
+        // 新增設定彈窗翻譯
+        settingsTitle: '设置',
+        adminPassLabel: '管理员密码：',
+        appPortLabel: '运行端口：',
+        saveButton: '保存',
+        cancelButton: '取消',
+        saveSuccess: '设置已保存。正在重启服务以应用新设置。',
+        saveFailed: '保存设置失败：',
+        radarRunningWarning: '雷达正在运行，请于停止状态再变更。', // 新增
+        warningTitle: '警告',
+        radarRunningInfo: '雷达正在运行，变更将于下次启动生效。',
+        saveSuccessNotRunning: '设置已保存。变更将于下次启动时套用。', // 新增
+        successTitle: '成功', // 新增
+        resetButton: '重置' // 新增
     },
     'zh-tw': {
         title: 'RAY Radar 控制面板',
@@ -577,7 +871,7 @@ const translations = {
         fileStatusChecking: '載入中...',
         fileMtimeLabel: '檔案上傳時間：',
         fileMtimeNotFound: '找不到檔案',
-        uploadButton: '上傳 EXE',
+        uploadButton: '上傳雷達 EXE',
         updateButton: '更新雷達 EXE',
         deleteButton: '刪除雷達 EXE',
         startButton: '啟動 Radar',
@@ -598,6 +892,20 @@ const translations = {
         deleteFailed: '刪除操作失敗: ',
         checkFailed: '檢查狀態失敗',
         fileDeleteFailed: '檔案刪除失敗：',
+        // 新增設定彈窗翻譯
+        settingsTitle: '設定',
+        adminPassLabel: '管理員密碼：',
+        appPortLabel: '運行端口：',
+        saveButton: '保存',
+        cancelButton: '取消',
+        saveSuccess: '設定已保存。正在重啟服務以應用新設定。',
+        saveFailed: '保存設定失敗：',
+        radarRunningWarning: '雷達正在運行，請於停止狀態再變更。', // 新增
+        warningTitle: '警告',
+        radarRunningInfo: '雷達正在運行，變更將於下次啟動生效。',
+        saveSuccessNotRunning: '設定已保存。變更將於下次啟動時套用。', // 新增
+        successTitle: '成功', // 新增
+        resetButton: '重置' // 新增
     }
 };
 
@@ -754,7 +1062,9 @@ async function checkFileStatus() {
                 deleteButton.id = 'delete-button';
                 deleteButton.classList.add('delete-btn');
                 deleteButton.addEventListener('click', deleteRadarExe);
-                actionButtonsDiv.appendChild(deleteButton);
+                
+                // 將刪除按鈕插入到最前面
+                actionButtonsDiv.insertBefore(deleteButton, actionButtonsDiv.firstChild);
             }
             deleteButton.textContent = translations[currentLang].deleteButton;
             
@@ -850,20 +1160,161 @@ document.getElementById('radarFile').addEventListener('change', function() {
         document.getElementById('upload-form').dispatchEvent(new Event('submit'));
     }
 });
+
+// --- 設定彈窗相關 JavaScript ---
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const saveBtn = document.getElementById('save-settings');
+const cancelBtn = document.getElementById('cancel-settings');
+const resetBtn = document.getElementById('reset-settings'); // 新增重置按鈕變數
+const settingsForm = document.getElementById('settings-form');
+const adminPassInput = document.getElementById('adminPass');
+const appPortInput = document.getElementById('appPort');
+
+// 顯示設定彈窗
+settingsBtn.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/check-status');
+        const data = await response.json();
+        
+        if (data.isRunning) {
+            showStatusWarningModal(translations[currentLang].radarRunningInfo);
+        } else {
+            // 服務未啟動時直接顯示設定介面
+            fetchAndPopulateConfig();
+            settingsModal.classList.add('show');
+        }
+    } catch (error) {
+        console.error('檢查雷達狀態失敗:', error);
+        alert('檢查雷達狀態失敗。');
+    }
+});
+
+// 隱藏設定彈窗
+cancelBtn.addEventListener('click', () => {
+    settingsModal.classList.remove('show');
+});
+
+// 點擊設定彈窗外部區域也隱藏彈窗
+settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.classList.remove('show');
+    }
+});
+
+// 讀取並填充設定
+async function fetchAndPopulateConfig() {
+    try {
+        const response = await fetch('/api/get-config');
+        const configData = await response.json();
+        adminPassInput.value = configData.adminPass;
+        appPortInput.value = configData.appPort;
+    } catch (error) {
+        console.error('讀取設定失敗:', error);
+    }
+}
+
+// 處理重置按鈕點擊
+resetBtn.addEventListener('click', () => {
+    fetchAndPopulateConfig();
+});
+
+// --- 警告彈窗相關 JavaScript ---
+const warningModal = document.getElementById('warning-modal');
+const warningMessageText = document.getElementById('warning-message-text');
+const warningConfirmBtn = document.getElementById('warning-confirm-btn');
+
+function showWarningModal(message) {
+    warningMessageText.textContent = message;
+    warningModal.classList.add('show');
+}
+
+warningConfirmBtn.addEventListener('click', () => {
+    warningModal.classList.remove('show');
+});
+
+// --- 新增的狀態警告彈窗 JavaScript ---
+const statusWarningModal = document.getElementById('status-warning-modal');
+const statusWarningMessageText = document.getElementById('status-warning-message-text');
+const statusWarningConfirmBtn = document.getElementById('status-warning-confirm-btn');
+
+function showStatusWarningModal(message) {
+    statusWarningMessageText.textContent = message;
+    statusWarningModal.classList.add('show');
+}
+
+statusWarningConfirmBtn.addEventListener('click', () => {
+    statusWarningModal.classList.remove('show');
+    fetchAndPopulateConfig(); // 點擊確定後，讀取並顯示設定彈窗
+    settingsModal.classList.add('show');
+});
+
+// --- 新增的成功提示彈窗 JavaScript ---
+const successModal = document.getElementById('success-modal');
+const successMessageText = document.getElementById('success-message-text');
+const successConfirmBtn = document.getElementById('success-confirm-btn');
+
+function showSuccessModal(message, shouldReload = false) {
+    successMessageText.textContent = message;
+    successModal.classList.add('show');
+    
+    if (shouldReload) {
+        successConfirmBtn.addEventListener('click', () => {
+            window.location.reload();
+        }, { once: true }); // 使用 once: true 確保只執行一次
+    } else {
+        successConfirmBtn.addEventListener('click', () => {
+            successModal.classList.remove('show');
+            settingsModal.classList.remove('show');
+        }, { once: true });
+    }
+}
+
+
+// 儲存設定
+settingsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const logDiv = document.getElementById('log');
+    
+    const newConfig = {
+        adminPass: adminPassInput.value,
+        appPort: appPortInput.value
+    };
+    
+    try {
+        const response = await fetch('/api/save-config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(newConfig)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            // 根據後端回傳的訊息判斷是否需要重新整理
+            const shouldReload = (data.message === translations[currentLang].saveSuccess);
+            showSuccessModal(data.message, shouldReload);
+            logDiv.innerHTML = data.message;
+        } else {
+            showWarningModal(data.message);
+            logDiv.innerHTML = translations[currentLang].saveFailed + data.message;
+        }
+    } catch (error) {
+        showWarningModal(translations[currentLang].saveFailed + error.message);
+        logDiv.innerHTML = translations[currentLang].saveFailed + error.message;
+    }
+});
 </script>
 </body>
 </html>
     `);
 });
 
-// --- API 路由 ---
-app.post('/radar/:action', handleRadarAction);
-app.get('/radar/log', getRadarLog);
-app.post('/upload', upload.single('radarFile'), handleUpload);
-app.post('/restart', handleRestart);
-app.post('/delete-exe', handleDelete);
-
 // --- 啟動伺服器 ---
-app.listen(PORT, () => {
-    console.log(`RAY Radar 網頁控制面板已啟動，監聽埠口 ${PORT}`);
+loadConfig().then(() => {
+    app.listen(PORT, () => {
+        console.log(`RAY Radar 網頁控制面板已啟動，監聽埠口 ${PORT}`);
+    });
 });
