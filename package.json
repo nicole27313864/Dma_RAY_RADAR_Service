@@ -13,6 +13,7 @@
     "chinese-conv": "^3.2.2",
     "express": "^5.1.0",
     "iconv-lite": "^0.7.0",
+    "multer": "^2.0.2",
     "opencc-js": "^1.0.5",
     "tongwen": "^0.3.2"
   }
