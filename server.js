@@ -9,8 +9,8 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 
 // 定義常數
-const RADAR_EXE_PATH = '/root/ray_radar/RAY_DELTA_RADAR.exe';
-const LOG_FILE = '/root/ray_radar/radar.log'; // 建議將日誌檔也放在專案目錄下
+const RADAR_EXE_PATH = '/root/Dma_RAY_RADAR_Service/RAY_DELTA_RADAR.exe';
+const LOG_FILE = '/root/Dma_RAY_RADAR_Service/radar.log'; // 建議將日誌檔也放在專案目錄下
 const PORT = 3000;
 const ADMIN_PASS = 'admin666';
 const APP_PORT = '8080';
