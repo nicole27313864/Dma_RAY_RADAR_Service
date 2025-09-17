@@ -1,6 +1,10 @@
+# Dma_RAY_RADAR_Service
+
 ### 專案說明
 
-**Dma_RAY_RADAR_Service** 是一個網頁控制面板服務，用於在 Linux 環境中管理和控制 `RAY_DELTA_RADAR.exe` 應用程式。此專案巧妙地利用 `wine` 技術，將原本為 Windows 設計的執行檔無縫整合到 Linux 伺服器中，並提供一個基於 Node.js 的網頁介面。使用者可以透過瀏覽器輕鬆地啟動、停止服務，並查看運行日誌，實現高效的遠端管理。
+**Dma_RAY_RADAR_Service** 是一個基於 DMA 軟體 **【RAY】** 的 Web 控制面板。此專案旨在解決在 Linux 環境中運行 Windows `.exe` 應用程式的挑戰。我們利用 **`wine`** 技術，成功地將 `RAY_DELTA_RADAR.exe` 雷達程式無縫整合到 Linux 伺服器中。
+
+專案核心是一個用 Node.js 開發的網頁介面，讓使用者可以透過任何瀏覽器輕鬆地遠端管理服務。這使得啟動、停止服務及查看日誌等操作變得前所未有的簡單，極大地提升了開發與維護的便利性。
 
 ---
 
