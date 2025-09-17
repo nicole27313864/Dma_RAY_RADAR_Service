@@ -20,18 +20,24 @@ sudo apt-get install -y wine
 echo "全域安裝 PM2..."
 sudo npm install -g pm2
 
-# 5. 下載程式碼
+# 5. 確保環境乾淨，移除舊服務與資料夾
+echo "移除舊的 PM2 服務與專案資料夾..."
+pm2 stop radar-panel
+pm2 delete radar-panel
+rm -rf Dma_RAY_RADAR_Service
+
+# 6. 下載程式碼
 echo "複製 GitHub 儲存庫..."
 git clone https://github.com/nicole27313864/Dma_RAY_RADAR_Service.git
 
-# 6. 進入專案目錄
+# 7. 進入專案目錄
 cd Dma_RAY_RADAR_Service
 
-# 7. 安裝 Node.js 依賴套件
+# 8. 安裝 Node.js 依賴套件
 echo "安裝 Node.js 依賴..."
 npm install
 
-# 8. 啟動服務並設定自動啟動
+# 9. 啟動服務並設定自動啟動
 echo "使用 PM2 啟動服務並設定開機自動啟動..."
 pm2 start server.js --name "radar-panel"
 pm2 save
