@@ -12,22 +12,26 @@ echo "安裝 Node.js..."
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# 3. 安裝 PM2
+# 3. 安裝 Wine，用於執行 Windows .exe 檔案
+echo "安裝 Wine..."
+sudo apt-get install -y wine
+
+# 4. 安裝 PM2
 echo "全域安裝 PM2..."
 sudo npm install -g pm2
 
-# 4. 下載程式碼
+# 5. 下載程式碼
 echo "複製 GitHub 儲存庫..."
 git clone https://github.com/nicole27313864/Dma_RAY_RADAR_Service.git
 
-# 5. 進入專案目錄
+# 6. 進入專案目錄
 cd Dma_RAY_RADAR_Service
 
-# 6. 安裝 Node.js 依賴套件
+# 7. 安裝 Node.js 依賴套件
 echo "安裝 Node.js 依賴..."
 npm install
 
-# 7. 啟動服務並設定自動啟動
+# 8. 啟動服務並設定自動啟動
 echo "使用 PM2 啟動服務並設定開機自動啟動..."
 pm2 start server.js --name "radar-panel"
 pm2 save
