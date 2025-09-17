@@ -136,7 +136,11 @@ const getRadarLog = async (req, res) => {
         
         res.send(str);
     } catch (err) {
-        res.send(`讀取 log 失敗: ${err.message}`);
+        if (err.code === 'ENOENT') {
+            return res.send('日誌檔案尚未建立。請啟動服務後等待日誌生成。');
+        } else {
+            res.send(`讀取 log 失敗: ${err.message}`);
+        }
     }
 };
 
@@ -207,23 +211,6 @@ const handleDelete = async (req, res) => {
         res.status(500).json({ status: 'error', message: `檔案刪除失敗：${error.message}` });
     }
 };
-
-// 處理日誌讀取
-app.get('/api/view-log', async (req, res) => {
-    try {
-        const data = await fs.readFile(LOG_FILE, 'utf8');
-        res.send(data);
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            // 如果檔案不存在，則返回一個空字串或提示訊息
-            res.send("日誌檔案尚未建立。請啟動服務後等待日誌生成。");
-        } else {
-            // 其他讀取錯誤
-            console.error('讀取日誌檔案時發生錯誤:', error);
-            res.status(500).send('讀取日誌時發生錯誤。');
-        }
-    }
-});
 
 // --- API 路由 ---
 // 獲取設定
