@@ -37,7 +37,13 @@ cd Dma_RAY_RADAR_Service
 echo "安裝 Node.js 依賴..."
 npm install
 
-# 9. 啟動服務並設定自動啟動
+# 9. 開放防火牆端口
+echo "開放防火牆端口 8080 和 3000..."
+sudo ufw allow 8080/tcp
+sudo ufw allow 3000/tcp
+sudo ufw enable
+
+# 10. 啟動服務並設定自動啟動
 echo "使用 PM2 啟動服務並設定開機自動啟動..."
 pm2 start server.js --name "radar-panel"
 pm2 save
