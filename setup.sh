@@ -39,7 +39,7 @@ npm install
 
 # 9. 開放防火牆端口
 echo "開放防火牆端口 8080 和 3000..."
-sudo ufw allow 8080/tcp
+# sudo ufw allow 8080/tcp
 sudo ufw allow 3000/tcp
 echo "y" | sudo ufw enable
 
